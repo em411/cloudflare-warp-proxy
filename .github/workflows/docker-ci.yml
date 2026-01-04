@@ -1,30 +1,53 @@
-name: Docker Image CI
+name: Build & publish (multi-arch) to GHCR
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "The warp version you want to build"
+        description: "The cloudflare-warp package version to build (apt version string)"
         required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/cloudflare-warp-proxy
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04-arm
+  build-and-push:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Docker build
-        run: |
-          VERSION=${{ github.event.inputs.version }}
-          docker buildx build --platform linux/arm64 --build-arg VERSION=$VERSION -t ghcr.io/jazzxp/cloudflare-warp-proxy:$VERSION -t ghcr.io/jazzxp/cloudflare-warp-proxy:latest .
-      - name: Login to Container Registry
-        uses: docker/login-action@v1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
         with:
-          registry: ghcr.io
+          platforms: amd64,arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Docker push
-        run: |
-          docker push ghcr.io/jazzxp/cloudflare-warp-proxy:${{ github.event.inputs.version }} && \
-          docker push ghcr.io/jazzxp/cloudflare-warp-proxy:latest
+
+      - name: Build & push multi-arch image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ inputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
