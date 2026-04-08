@@ -1,36 +1,51 @@
-FROM docker.io/debian:bookworm-slim AS cf
-ARG VERSION
-ENV DEBIAN_FRONTEND noninteractive
-WORKDIR /
-RUN set -x && \
-  apt update && \
-  apt install -y gnupg ca-certificates libcap2-bin curl lsb-release tini && \
-  curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg && \
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list && \
-  apt update && \
-  apt install cloudflare-warp=$VERSION -y && \
-  apt autoremove -y && \
-  apt clean -y &&\
-  rm -rf /var/lib/apt/lists/*
+ARG DEBIAN_VERSION=bookworm-slim
+ARG TINYPROXY_VERSION=1.11.2
 
-FROM docker.io/debian:bookworm-slim AS tinyproxy
-ENV DEBIAN_FRONTEND noninteractive
-ARG VERSION
-RUN apt update && \
-  apt install -y build-essential curl && \
-  curl -OL https://github.com/tinyproxy/tinyproxy/releases/download/1.11.2/tinyproxy-1.11.2.tar.gz && \
-  tar zvxf tinyproxy-1.11.2.tar.gz
-RUN cd tinyproxy-1.11.2 && \
-  ./configure --enable-upstream && make && make install && \
-  cp src/tinyproxy /
+# Stage 1: Build tinyproxy with upstream support
+FROM docker.io/debian:${DEBIAN_VERSION} AS tinyproxy-builder
+ARG TINYPROXY_VERSION
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential curl ca-certificates && \
+    curl -fsSL -o tinyproxy.tar.gz \
+      "https://github.com/tinyproxy/tinyproxy/releases/download/${TINYPROXY_VERSION}/tinyproxy-${TINYPROXY_VERSION}.tar.gz" && \
+    tar xzf tinyproxy.tar.gz && \
+    cd "tinyproxy-${TINYPROXY_VERSION}" && \
+    ./configure --enable-upstream && \
+    make -j"$(nproc)" && \
+    cp src/tinyproxy /usr/local/bin/tinyproxy
 
-FROM cf AS final
-ENV DEBIAN_FRONTEND noninteractive
-ARG VERSION
+# Stage 2: Install cloudflare-warp
+FROM docker.io/debian:${DEBIAN_VERSION} AS warp
+ARG WARP_VERSION
+ARG DEBIAN_FRONTEND=noninteractive
+RUN test -n "${WARP_VERSION}" || { echo "WARP_VERSION build arg is required" >&2; exit 1; } && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      gnupg ca-certificates curl lsb-release tini && \
+    curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+      | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
+      > /etc/apt/sources.list.d/cloudflare-client.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends "cloudflare-warp=${WARP_VERSION}" && \
+    apt-get purge -y gnupg lsb-release && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY --from=tinyproxy /tinyproxy /usr/bin/
-COPY run.sh tinyproxy.conf ./
-RUN chmod +x /run.sh && mkdir -p /var/log/warp
+# Stage 3: Final image
+FROM warp AS final
+
+COPY --from=tinyproxy-builder /usr/local/bin/tinyproxy /usr/bin/tinyproxy
+COPY run.sh tinyproxy.conf /
+
+RUN chmod +x /run.sh
+
 EXPOSE 8888
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD warp-cli --accept-tos status 2>/dev/null | grep -q Connected || exit 1
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/run.sh"]
