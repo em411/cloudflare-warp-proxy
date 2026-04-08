@@ -1,16 +1,54 @@
 #!/bin/bash
+set -euo pipefail
 
-warp-svc >/var/log/warp/log &
-(
-	while ! warp-cli --accept-tos registration new; do
-		sleep 1
-		>&2 echo "Awaiting warp-svc become online..."
-	done
-	warp-cli --accept-tos mode proxy
-	warp-cli --accept-tos proxy port 40000
-	if [ -n "$LICENSE_KEY" ]; then
-		warp-cli --accept-tos registration license $LICENSE_KEY
+WARP_PORT=40000
+MAX_RETRIES=30
+
+warp_cli() {
+	warp-cli --accept-tos "$@"
+}
+
+warp-svc &
+WARP_PID=$!
+trap 'kill ${WARP_PID} 2>/dev/null' EXIT TERM INT
+
+# Wait for warp-svc and register (skip if already registered)
+retries=0
+while ! warp_cli registration show 2>/dev/null; do
+	if warp_cli registration new 2>/dev/null; then
+		continue
 	fi
-	warp-cli -l --accept-tos connect
-) &
-/usr/bin/tinyproxy -d -c tinyproxy.conf
+	retries=$((retries + 1))
+	if [ "${retries}" -ge "${MAX_RETRIES}" ]; then
+		echo "Failed to register after ${MAX_RETRIES} attempts, giving up" >&2
+		exit 1
+	fi
+	echo "Awaiting warp-svc to become online... (${retries}/${MAX_RETRIES})" >&2
+	sleep 2
+done
+
+warp_cli mode proxy
+warp_cli proxy port "${WARP_PORT}"
+
+if [ -n "${LICENSE_KEY:-}" ]; then
+	warp_cli registration license "${LICENSE_KEY}"
+fi
+
+warp_cli -l connect
+
+# Wait for WARP to establish connection
+retries=0
+while true; do
+	if warp_cli status 2>/dev/null | grep -q "Connected"; then
+		break
+	fi
+	retries=$((retries + 1))
+	if [ "${retries}" -ge "${MAX_RETRIES}" ]; then
+		echo "WARP failed to connect after ${MAX_RETRIES} attempts, giving up" >&2
+		exit 1
+	fi
+	echo "Waiting for WARP to connect... (${retries}/${MAX_RETRIES})" >&2
+	sleep 2
+done
+
+exec /usr/bin/tinyproxy -d -c /tinyproxy.conf
