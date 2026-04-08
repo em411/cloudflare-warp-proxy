@@ -8,7 +8,7 @@ warp_cli() {
 	warp-cli --accept-tos "$@"
 }
 
-warp-svc &
+warp-svc > /dev/null 2>&1 &
 WARP_PID=$!
 trap 'kill ${WARP_PID} 2>/dev/null' EXIT TERM INT
 
