@@ -29,7 +29,7 @@ RUN test -n "${WARP_VERSION}" || { echo "WARP_VERSION build arg is required" >&2
       > /etc/apt/sources.list.d/cloudflare-client.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends "cloudflare-warp=${WARP_VERSION}" && \
-    apt-get purge -y gnupg lsb-release && \
+    apt-get purge -y lsb-release && \
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
