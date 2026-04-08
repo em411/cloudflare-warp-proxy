@@ -1,12 +1,18 @@
 name: Build & publish (multi-arch) to GHCR
 
 on:
+  schedule:
+    - cron: "0 6 * * *" # daily at 06:00 UTC
   workflow_dispatch:
     inputs:
       version:
         description: "The cloudflare-warp package version to build (apt version string). Leave empty to auto-detect latest."
         required: false
         type: string
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -68,8 +74,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -86,14 +90,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.detect-version.outputs.version }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=Cloudflare WARP Proxy
+            org.opencontainers.image.description=HTTP proxy server backed by Cloudflare WARP
+            org.opencontainers.image.version=${{ needs.detect-version.outputs.version }}
+
       - name: Build & push multi-arch image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
-            VERSION=${{ inputs.version }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            WARP_VERSION=${{ needs.detect-version.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,16 @@
+services:
+  warp-proxy:
+    image: ghcr.io/em411/cloudflare-warp-proxy:latest
+    container_name: warp-proxy
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8888:8888"
+    volumes:
+      - warp-data:/var/lib/cloudflare-warp
+    environment:
+      - LICENSE_KEY=${LICENSE_KEY:-}
+
+volumes:
+  warp-data:
