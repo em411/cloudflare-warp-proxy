@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "The cloudflare-warp package version to build (apt version string)"
-        required: true
+        description: "The cloudflare-warp package version to build (apt version string). Leave empty to auto-detect latest."
+        required: false
         type: string
 
 permissions:
