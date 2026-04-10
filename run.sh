@@ -27,13 +27,18 @@ while ! warp_cli registration show 2>/dev/null; do
 	sleep 2
 done
 
+echo "Setting WARP mode to proxy..."
 warp_cli mode proxy
+
+echo "Setting WARP proxy port to ${WARP_PORT}..."
 warp_cli proxy port "${WARP_PORT}"
 
 if [ -n "${LICENSE_KEY:-}" ]; then
+	echo "Applying license key..."
 	warp_cli registration license "${LICENSE_KEY}"
 fi
 
+echo "Connecting to WARP..."
 warp_cli connect
 
 # Wait for WARP to establish connection
@@ -51,4 +56,5 @@ while true; do
 	sleep 2
 done
 
+echo "WARP connected, starting tinyproxy on port 8888..."
 exec /usr/bin/tinyproxy -d -c /tinyproxy.conf
