@@ -34,7 +34,7 @@ if [ -n "${LICENSE_KEY:-}" ]; then
 	warp_cli registration license "${LICENSE_KEY}"
 fi
 
-warp_cli -l connect
+warp_cli connect
 
 # Wait for WARP to establish connection
 retries=0
