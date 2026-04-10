@@ -1,6 +1,13 @@
 name: Build & publish (multi-arch) to GHCR
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "run.sh"
+      - "tinyproxy.conf"
+      - ".github/workflows/docker-ci.yml"
   schedule:
     - cron: "0 6 * * *" # daily at 06:00 UTC
   workflow_dispatch:
@@ -59,7 +66,10 @@ jobs:
         env:
           VERSION: ${{ steps.resolve.outputs.version }}
         run: |
-          if docker manifest inspect "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}" > /dev/null 2>&1; then
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Push event, will always build"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          elif docker manifest inspect "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}" > /dev/null 2>&1; then
             echo "Version ${VERSION} already exists in registry, skipping build"
             echo "should_build=false" >> "$GITHUB_OUTPUT"
           else
