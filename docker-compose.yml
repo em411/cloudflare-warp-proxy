@@ -3,6 +3,7 @@ services:
     image: ghcr.io/em411/cloudflare-warp-proxy:latest
     container_name: warp-proxy
     restart: unless-stopped
+    mem_limit: 512m
     cap_add:
       - NET_ADMIN
     ports:

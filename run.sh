@@ -10,12 +10,31 @@ warp_cli() {
 
 warp-svc > /dev/null 2>&1 &
 WARP_PID=$!
-trap 'kill ${WARP_PID} 2>/dev/null' EXIT TERM INT
+PROXY_PID=""
 
-# Wait for warp-svc and register (skip if already registered)
+# Stop both daemons whenever the script ends, whatever the reason
+cleanup() {
+	trap - EXIT
+	kill ${PROXY_PID} "${WARP_PID}" 2>/dev/null || true
+	wait 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+
+require_warp_svc() {
+	if ! kill -0 "${WARP_PID}" 2>/dev/null; then
+		echo "warp-svc is not running, giving up" >&2
+		exit 1
+	fi
+}
+
+# Wait for warp-svc and register (skip if already registered).
+# Output is discarded: "registration show" prints the account ID and license key.
 retries=0
-while ! warp_cli registration show 2>/dev/null; do
-	if warp_cli registration new 2>/dev/null; then
+while ! warp_cli registration show > /dev/null 2>&1; do
+	require_warp_svc
+	if warp_cli registration new > /dev/null 2>&1; then
+		echo "Registered a new WARP device"
 		continue
 	fi
 	retries=$((retries + 1))
@@ -35,7 +54,7 @@ warp_cli proxy port "${WARP_PORT}"
 
 if [ -n "${LICENSE_KEY:-}" ]; then
 	echo "Applying license key..."
-	warp_cli registration license "${LICENSE_KEY}"
+	warp_cli registration license "${LICENSE_KEY}" > /dev/null
 fi
 
 echo "Connecting to WARP..."
@@ -44,6 +63,7 @@ warp_cli connect
 # Wait for WARP to establish connection
 retries=0
 while true; do
+	require_warp_svc
 	if warp_cli status 2>/dev/null | grep -q "Connected"; then
 		break
 	fi
@@ -57,4 +77,20 @@ while true; do
 done
 
 echo "WARP connected, starting tinyproxy on port 8888..."
-exec /usr/bin/tinyproxy -d -c /tinyproxy.conf
+/usr/bin/tinyproxy -d -c /tinyproxy.conf &
+PROXY_PID=$!
+
+# The container is only useful while both daemons run. Exit as soon as either
+# one dies (for example warp-svc killed at a memory limit) so the restart
+# policy brings the whole container back instead of leaving a dead proxy.
+set +e
+wait -n "${WARP_PID}" "${PROXY_PID}"
+code=$?
+set -e
+
+if kill -0 "${WARP_PID}" 2>/dev/null; then
+	echo "tinyproxy exited (status ${code}), stopping container" >&2
+else
+	echo "warp-svc exited (status ${code}), stopping container" >&2
+fi
+exit 1

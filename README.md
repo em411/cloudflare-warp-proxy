@@ -76,6 +76,19 @@ The container runs two processes managed by [tini](https://github.com/krallin/ti
 1. **Cloudflare WARP** (`warp-svc`) -- connects to Cloudflare's network and exposes a local proxy on port 40000
 2. **tinyproxy** -- listens on port 8888 and forwards all traffic upstream to WARP
 
+If either process exits, the container exits with status 1, so a restart policy (`restart: unless-stopped`) brings both back together.
+
+## Memory
+
+`warp-svc` starts at around 100 MB but its memory grows slowly over weeks of uptime (over 3 GB was observed after 87 days). Set a memory limit so the container restarts itself instead of growing without bound:
+
+```yaml
+    restart: unless-stopped
+    mem_limit: 512m
+```
+
+When the limit is reached the kernel kills `warp-svc`, the container exits, and the restart policy starts it again within a few seconds.
+
 ## Building
 
 ```bash
@@ -87,4 +100,4 @@ The `WARP_VERSION` argument is required and must match an available version in t
 ## Requirements
 
 - `NET_ADMIN` capability (required by WARP to create a tunnel)
-- ~1GB RAM (inherent to the `warp-svc` daemon)
+- Around 100 MB RAM at start; see [Memory](#memory) for long-running containers
